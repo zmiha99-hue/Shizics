@@ -564,7 +564,12 @@ async function runDraftGeneration(triggerMessage, contextMessages) {
 
         const prevStats = { ...DEFAULT_LLM_STATS, ...(latest.llmStats || {}) };
         const latestState = { ...DEFAULT_STATE, ...(latest.contextState || {}) };
-        const isNoReply = result.text === "NO_REPLY";
+        const stripForEcho = (s) => String(s || "").replace(/^\[AI\]\s*/i, "").replace(/[^\p{L}\p{N}\s]/gu, "").replace(/\s+/g, " ").trim().toLowerCase();
+        const replyNorm = stripForEcho(result.text);
+        const triggerNorm = stripForEcho(triggerMessage.text);
+        const recentNorms = (Array.isArray(latestState.recentSentTexts) ? latestState.recentSentTexts : []).slice(-5).map(stripForEcho);
+        const isEcho = Boolean(replyNorm && ((triggerNorm && replyNorm === triggerNorm) || recentNorms.includes(replyNorm)));
+        const isNoReply = result.text === "NO_REPLY" || isEcho;
 
         const nextDraft = {
           draftId: `draft_${Date.now()}`,
