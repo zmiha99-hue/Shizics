@@ -53,8 +53,8 @@ if errorlevel 1 (
 )
 
 echo [3/3] Копирование обновлённых файлов...
-xcopy "%EXTRACT_DIR%\Shizics-main\*" "%~dp0" /E /H /Y /Q >nul
-if errorlevel 1 (
+robocopy "%EXTRACT_DIR%\Shizics-main" "%~dp0." /E /XF update_extension.bat /NFL /NDL /NJH /NJS /NC /NS /NP >nul
+if errorlevel 8 (
   echo.
   echo [!] Ошибка при копировании файлов. Закройте открытые файлы и попробуйте снова.
   pause
