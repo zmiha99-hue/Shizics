@@ -17,23 +17,52 @@ if %errorlevel%==0 (
   )
 )
 
-echo Git не найден — скачиваю архив с GitHub через PowerShell...
-powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-  "$zip = Join-Path $env:TEMP 'shizics_main.zip';" ^
-  "$dir = Join-Path $env:TEMP 'shizics_extract';" ^
-  "Invoke-WebRequest -Uri 'https://github.com/zmiha99-hue/Shizics/archive/refs/heads/main.zip' -OutFile $zip;" ^
-  "if (Test-Path $dir) { Remove-Item -Recurse -Force $dir };" ^
-  "Expand-Archive -Path $zip -DestinationPath $dir -Force;" ^
-  "$src = Join-Path $dir 'Shizics-main';" ^
-  "Copy-Item -Path (Join-Path $src '*') -Destination '.' -Recurse -Force;" ^
-  "Remove-Item -Force $zip; Remove-Item -Recurse -Force $dir"
+echo Git не найден — скачиваю архив с GitHub...
+set "ZIP_FILE=%TEMP%\shizics_main.zip"
+set "EXTRACT_DIR=%TEMP%\shizics_extract"
+set "ZIP_URL=https://github.com/zmiha99-hue/Shizics/archive/refs/heads/main.zip"
+
+if exist "%ZIP_FILE%" del /f /q "%ZIP_FILE%" >nul 2>&1
+
+echo [1/3] Скачивание архива...
+where curl.exe >nul 2>&1
+if %errorlevel%==0 (
+  curl.exe -fL --connect-timeout 15 --max-time 60 --progress-bar "%ZIP_URL%" -o "%ZIP_FILE%"
+) else (
+  powershell -NoProfile -ExecutionPolicy Bypass -Command "$ProgressPreference='SilentlyContinue'; [Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -UseBasicParsing -TimeoutSec 45 -Uri '%ZIP_URL%' -OutFile '%ZIP_FILE%'"
+)
 
 if errorlevel 1 (
   echo.
-  echo [!] Ошибка при скачивании обновления с GitHub.
+  echo [!] Ошибка при скачивании архива с GitHub. Проверьте интернет или VPN.
   pause
   exit /b 1
 )
+
+echo [2/3] Распаковка архива...
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+  "$ProgressPreference='SilentlyContinue';" ^
+  "if (Test-Path '%EXTRACT_DIR%') { Remove-Item -Recurse -Force '%EXTRACT_DIR%' };" ^
+  "Expand-Archive -Path '%ZIP_FILE%' -DestinationPath '%EXTRACT_DIR%' -Force"
+
+if errorlevel 1 (
+  echo.
+  echo [!] Ошибка при распаковке архива.
+  pause
+  exit /b 1
+)
+
+echo [3/3] Копирование обновлённых файлов...
+xcopy "%EXTRACT_DIR%\Shizics-main\*" "%~dp0" /E /H /Y /Q >nul
+if errorlevel 1 (
+  echo.
+  echo [!] Ошибка при копировании файлов. Закройте открытые файлы и попробуйте снова.
+  pause
+  exit /b 1
+)
+
+del /f /q "%ZIP_FILE%" >nul 2>&1
+rmdir /s /q "%EXTRACT_DIR%" >nul 2>&1
 
 :done
 echo.
