@@ -13,7 +13,7 @@ const DEFAULT_SETTINGS = {
   runState: "running",
   provider: "ollama",
   endpointUrl: "http://localhost:11434",
-  model: "qwen2.5:3b",
+  model: "qwen3.5:9b",
   personaPrompt: "",
   useAiPrefix: false,
   deepThink: true,

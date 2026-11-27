@@ -9,6 +9,7 @@ const ROLE_LABELS = {
 let lastDraftIdRendered = "";
 let currentAutoState = {};
 let personaExpanded = false;
+let autoUiError = "";
 
 function formatRemaining(expiresAt) {
   if (!expiresAt) return "15:00";
@@ -41,7 +42,11 @@ function renderAutoSection(auto) {
   toggleBtn.textContent = enabled ? "Остановить авторежим" : "Включить авторежим";
   toggleBtn.className = enabled ? "subtle-danger" : "primary";
 
-  stopReasonEl.textContent = (auto && auto.stopReason) || "Ограничения учебного эксперимента (не лимиты Twitch).";
+  if (enabled) {
+    autoUiError = "";
+  }
+  stopReasonEl.textContent = autoUiError || (auto && auto.stopReason) || "Ограничения учебного эксперимента (не лимиты Twitch).";
+  stopReasonEl.style.color = autoUiError ? "var(--err)" : "";
 }
 
 function updateProviderVisibility(provider) {
@@ -114,7 +119,7 @@ function renderState(settings, state, draft, llmStats, delivery, auto, hasKey, c
   keyStatusText.textContent = hasKey ? "Ключ сохранён локально" : "Ключ не задан";
 
   const llmBadge = document.getElementById("llmBadge");
-  const activeModel = (settings && settings.model) || "qwen2.5:3b";
+  const activeModel = (settings && settings.model) || "qwen3.5:9b";
   if (provider === "stub" || (provider === "gemini" && !hasKey)) {
     llmBadge.textContent = "Модель: заглушка";
     llmBadge.className = "pill warn";
@@ -267,7 +272,7 @@ function loadAndRender(populateInputs = false) {
         document.getElementById("proactiveQuestionsCheck").checked = settings.proactiveQuestions !== false;
         document.getElementById("providerSelect").value = settings.provider || "ollama";
         document.getElementById("endpointInput").value = settings.endpointUrl || "http://localhost:11434";
-        document.getElementById("modelInput").value = settings.model || "qwen2.5:3b";
+        document.getElementById("modelInput").value = settings.model || "qwen3.5:9b";
         document.getElementById("personaPrompt").value = settings.personaPrompt || "";
       }
 
@@ -285,7 +290,7 @@ function updateSettings(partial, showSaved = false) {
       runState: "running",
       provider: "ollama",
       endpointUrl: "http://localhost:11434",
-      model: "qwen2.5:3b",
+      model: "qwen3.5:9b",
       personaPrompt: "",
       useAiPrefix: false,
       deepThink: true,
@@ -420,9 +425,13 @@ document.getElementById("toggleAutoBtn").addEventListener("click", () => {
   chrome.runtime.sendMessage(
     { type: "TOGGLE_AUTO_MODE", enabled: enable, maxMessages, minIntervalSec },
     (resp) => {
-      void chrome.runtime.lastError;
-      if (resp && !resp.ok && resp.error) {
-        document.getElementById("autoStopReason").textContent = resp.error;
+      const err = chrome.runtime.lastError;
+      if (err) {
+        autoUiError = "Ошибка связи с фоновым сервисом. Перезагрузите расширение.";
+      } else if (resp && !resp.ok && resp.error) {
+        autoUiError = resp.error;
+      } else {
+        autoUiError = "";
       }
       loadAndRender(false);
     }

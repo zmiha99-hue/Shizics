@@ -1,7 +1,7 @@
 "use strict";
 
 const DEFAULT_GEMINI_MODEL = "gemini-3.8-flash";
-const DEFAULT_OLLAMA_MODEL = "qwen2.5:3b";
+const DEFAULT_OLLAMA_MODEL = "qwen3.5:9b";
 const DEFAULT_OLLAMA_URL = "http://localhost:11434";
 
 const DEFAULT_PERSONA_PROMPT = [

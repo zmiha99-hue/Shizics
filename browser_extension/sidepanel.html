@@ -433,7 +433,14 @@
         </div>
         <div class="field">
           <label for="modelInput">Модель (GTX 1070 8GB: qwen3.5:9b, qwen2.5:7b · Мощные ПК: gpt-oss:20b)</label>
-          <input id="modelInput" placeholder="qwen3.5:9b" />
+          <input id="modelInput" list="modelSuggestions" placeholder="qwen3.5:9b" />
+          <datalist id="modelSuggestions">
+            <option value="qwen3.5:9b">Qwen 3.5 9B (оптимально для 8 GB VRAM)</option>
+            <option value="gpt-oss:20b">GPT-OSS 20B (для мощных ПК)</option>
+            <option value="qwen3:8b">Qwen 3 8B</option>
+            <option value="qwen2.5:7b">Qwen 2.5 7B (быстрая)</option>
+            <option value="gemma3:4b">Gemma 3 4B (лёгкая)</option>
+          </datalist>
         </div>
         <div id="apiKeySection">
           <div class="field">
