@@ -363,6 +363,20 @@ async function runTests() {
     assert(autoExperiment.pendingAutoReply === true, "must mark pendingAutoReply for flush when slot frees");
   });
 
+  // Peer-bot role, streamer vocative, unsafe content, meta-fact & paraphrase checks
+  await test("PeerBot_Safety_And_Filters", async () => {
+    assert(classifyRole("stintinckonelove", "привет", "y4k0bs", [], "cocainu", "stintinckonelove") === "peer_bot", "peer_bot role must be classified");
+    assert(countTrailingBotTurns([{ role: "other" }, { role: "peer_bot" }, { role: "own_ai" }, { role: "peer_bot" }]) === 3, "countTrailingBotTurns must count trailing bot turns");
+    assert(isExplicitlyAddressedToOther("Миш, а кс сегодня будет?", "cocainu", "mishakuhn") === true, "streamer vocative must be skipped");
+    assert(isExplicitlyAddressedToOther("привет @y4k0bs как дела", "cocainu", "mishakuhn") === true, "@other anywhere must be skipped");
+    assert(isExplicitlyAddressedToOther("привет @cocainu как дела", "cocainu", "mishakuhn") === false, "@self must be allowed");
+    assert(formatReplyText("вот ссылка https://example.com", false) === "NO_REPLY", "URLs must be blocked");
+    assert(formatReplyText("давай скинь инвентарь", false) === "NO_REPLY", "inventory phishing phrase must be blocked");
+    assert(sanitizeMemoryFact("первый раз упомянул мемы", "") === "", "meta-fact must be rejected");
+    assert(factMatchesReply("люблю пиццу с ананасами", "привет чат!") === false, "ungrounded fact must not match unrelated reply");
+    assert(wordOverlapRatio("я обычно беру саппорт но ставлю керри", "я тоже люблю саппорт но ставлю керри") >= 0.60, "paraphrase overlap must trigger");
+  });
+
   document.getElementById("results").textContent = results.join("\n");
 }
 

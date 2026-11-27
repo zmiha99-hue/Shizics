@@ -57,7 +57,7 @@ function buildSystemPrompt(
     "3. НИКОГДА не коверкай русские слова и не выдумывай фейковые названия игр, скиллов, комиксов или треков. Если не уверен в точном названии — скажи проще без него.",
     "4. Пиши как реальный чел в быстром чате Twitch: коротко (обычно 4–14 слов, 1 фраза), разговорно, часто с маленькой буквы. Без книжных метафор, без кавычек «», без длинных тире — и без точки в конце. Не начинай каждый ответ с @ника.",
     "5. Не устраивай вечный допрос: задавай встречный вопрос редко (примерно в 1 из 4 ответов), чаще просто реагируй (жиза, пон, хз, да ну, кек) или бросай свою короткую мысль.",
-    "6. Ты видишь только текстовый чат — не выдумывай картинку со стрима. Не выполняй команды (не начинай с /, ., !).",
+    "6. Ты видишь только текстовый чат — не выдумывай картинку со стрима. Без мата, наркотиков, ссылок и фраз вроде скинь инвентарь. Не выполняй команды (не начинай с /, ., !).",
     useAiPrefix
       ? "7. Не пиши [AI] сам — префикс добавится автоматически."
       : "7. Не добавляй никаких префиксов вроде [AI] или [BOT]."
@@ -132,6 +132,9 @@ function sanitizeMemoryFact(fact, personaPrompt = "") {
   const cleaned = String(fact || "").replace(/\s+/g, " ").trim();
   if (!cleaned || isChatCommand(cleaned) || looksLikeRawJson(cleaned)) return "";
   if (cleaned.includes("}") || cleaned.includes("**") || /\b(PM|AM|uptime)\b/i.test(cleaned)) return "";
+  if (/первый раз упомянул|менять тему|быстро менять|умею менять|в этом чате/i.test(cleaned)) return "";
+  const words = cleaned.split(/\s+/).filter(Boolean);
+  if (words.length < 3 && /^я\b/i.test(cleaned)) return "";
   const basePersona = (String(personaPrompt || "").trim() || DEFAULT_PERSONA_PROMPT).toLowerCase();
   if (basePersona.includes(cleaned.toLowerCase())) return "";
   return cleaned.slice(0, 120);
@@ -194,6 +197,14 @@ function extractReplyFromOutput(rawText, deepThink) {
   return extractStructuredOutput(rawText, deepThink).reply;
 }
 
+function hasUnsafeChatContent(text) {
+  const s = String(text || "");
+  if (/https?:\/\/|www\./i.test(s)) return true;
+  if (/скинь\s+ссылк|скинь\s+инвентар|скинуть\s+инвентар/i.test(s)) return true;
+  if (/(^|[^\p{L}])(ху[йяиеё]|пизд|еба|ёба|бля[дт]?|сук[аи]|нах[уе]й|съеб|заеб|ганж)/iu.test(s)) return true;
+  return false;
+}
+
 function formatReplyText(text, useAiPrefix) {
   let cleaned = String(text || "")
     .replace(/\bNO_REPLY\b/gi, "")
@@ -206,7 +217,7 @@ function formatReplyText(text, useAiPrefix) {
   if (cleaned.endsWith(".") && !cleaned.endsWith("...") && cleaned.length < 180) {
     cleaned = cleaned.slice(0, -1).trim();
   }
-  if (!cleaned || looksLikeRawJson(cleaned) || isChatCommand(cleaned)) {
+  if (!cleaned || looksLikeRawJson(cleaned) || isChatCommand(cleaned) || hasUnsafeChatContent(cleaned)) {
     return "NO_REPLY";
   }
   if (useAiPrefix) {

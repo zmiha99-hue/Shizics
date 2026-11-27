@@ -2,6 +2,7 @@
 
 const ROLE_LABELS = {
   controller_human: "управляющий",
+  peer_bot: "бот-собеседник",
   own_ai: "свой ИИ",
   other: "участник"
 };
@@ -266,6 +267,7 @@ function loadAndRender(populateInputs = false) {
         document.getElementById("allowedChannel").value = settings.allowedChannel || "";
         document.getElementById("controllerLogin").value = settings.controllerLogin || "";
         document.getElementById("botLogin").value = settings.botLogin || "";
+        document.getElementById("peerBotLogin").value = settings.peerBotLogin || "";
         document.getElementById("contextWindow").value = settings.contextWindow || 12;
         document.getElementById("useAiPrefixCheck").checked = Boolean(settings.useAiPrefix);
         document.getElementById("deepThinkCheck").checked = settings.deepThink !== false;
@@ -374,6 +376,12 @@ document.getElementById("saveSettingsBtn").addEventListener("click", () => {
     .filter(Boolean)
     .join(", ");
   const botLogin = document.getElementById("botLogin").value.trim().replace(/^#/, "").toLowerCase();
+  const peerBotLogin = document
+    .getElementById("peerBotLogin")
+    .value.split(/[,;\s]+/)
+    .map((s) => s.trim().replace(/^#/, "").toLowerCase())
+    .filter(Boolean)
+    .join(", ");
   const contextWindow = Math.max(1, Math.min(30, Number(document.getElementById("contextWindow").value) || 12));
   const useAiPrefix = Boolean(document.getElementById("useAiPrefixCheck").checked);
   const deepThink = Boolean(document.getElementById("deepThinkCheck").checked);
@@ -387,6 +395,7 @@ document.getElementById("saveSettingsBtn").addEventListener("click", () => {
       allowedChannel,
       controllerLogin,
       botLogin,
+      peerBotLogin,
       contextWindow,
       useAiPrefix,
       deepThink,

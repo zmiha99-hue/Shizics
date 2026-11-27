@@ -9,6 +9,7 @@ const DEFAULT_SETTINGS = {
   allowedChannel: "",
   controllerLogin: "",
   botLogin: "",
+  peerBotLogin: "",
   contextWindow: 12,
   runState: "running",
   provider: "ollama",
@@ -79,6 +80,7 @@ const DEFAULT_AUTO = {
   nextAllowedAt: null,
   recentAutoTimestamps: [],
   pendingAutoReply: false,
+  pendingTriggerId: "",
   stopReason: ""
 };
 
@@ -142,13 +144,27 @@ function normalizeTextForMatch(value) {
   return String(value || "").replace(/\s+/g, " ").trim();
 }
 
-function isExplicitlyAddressedToOther(text, botLogin) {
-  const match = String(text || "").trim().match(/^@([A-Za-z0-9_]{2,30})\b/);
-  if (!match) return false;
-  const mentioned = match[1].toLowerCase();
+function isExplicitlyAddressedToOther(text, botLogin, channel = "") {
+  const s = String(text || "").trim();
+  if (!s) return false;
   const botNorm = normalizeLogin(botLogin);
-  if (botNorm && mentioned === botNorm) return false;
-  return true;
+  const mentions = s.match(/@([A-Za-z0-9_]{2,30})\b/g) || [];
+  for (const m of mentions) {
+    const nick = m.slice(1).toLowerCase();
+    if (!botNorm || nick !== botNorm) {
+      return true;
+    }
+  }
+  const chNorm = normalizeLogin(channel);
+  if (chNorm && chNorm !== botNorm) {
+    if (s.toLowerCase().startsWith(chNorm + " ") || s.toLowerCase().startsWith(chNorm + ",")) {
+      return true;
+    }
+    if (chNorm.startsWith("mish") && /^(миш[аеу]?|мишаня|миха)[,!?\s:]/i.test(s)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 function parseControllerLogins(value) {
@@ -160,7 +176,7 @@ function parseControllerLogins(value) {
   );
 }
 
-function classifyRole(author, text, controllerLogin, recentSentTexts = [], botLogin = "") {
+function classifyRole(author, text, controllerLogin, recentSentTexts = [], botLogin = "", peerBotLogin = "") {
   const normText = normalizeTextForMatch(text);
   const normAuthor = normalizeLogin(author);
   const normBot = normalizeLogin(botLogin);
@@ -173,11 +189,47 @@ function classifyRole(author, text, controllerLogin, recentSentTexts = [], botLo
   if (Array.isArray(recentSentTexts) && recentSentTexts.includes(normText)) {
     return "own_ai";
   }
+  const peerBots = parseControllerLogins(peerBotLogin);
+  if (peerBots.size > 0 && peerBots.has(normAuthor)) {
+    return "peer_bot";
+  }
   const controllers = parseControllerLogins(controllerLogin);
   if (controllers.size > 0 && controllers.has(normAuthor)) {
     return "controller_human";
   }
   return "other";
+}
+
+function countTrailingBotTurns(messages) {
+  const list = Array.isArray(messages) ? messages : [];
+  let count = 0;
+  for (let i = list.length - 1; i >= 0; i -= 1) {
+    const r = list[i] && list[i].role;
+    if (r === "own_ai" || r === "peer_bot") {
+      count += 1;
+    } else {
+      break;
+    }
+  }
+  return count;
+}
+
+function factMatchesReply(fact, finalText) {
+  const fWords = String(fact || "").toLowerCase().match(/[\p{L}\p{N}]{4,}/gu) || [];
+  if (fWords.length === 0) return false;
+  const rLower = String(finalText || "").toLowerCase();
+  return fWords.some((w) => rLower.includes(w.length >= 5 ? w.slice(0, 4) : w));
+}
+
+function wordOverlapRatio(a, b) {
+  const wa = new Set(String(a || "").toLowerCase().match(/[\p{L}\p{N}]{3,}/gu) || []);
+  const wb = new Set(String(b || "").toLowerCase().match(/[\p{L}\p{N}]{3,}/gu) || []);
+  if (wa.size < 4 || wb.size < 4) return 0;
+  let inter = 0;
+  for (const w of wa) {
+    if (wb.has(w)) inter += 1;
+  }
+  return inter / Math.min(wa.size, wb.size);
 }
 
 chrome.storage.onChanged.addListener((changes, areaName) => {
@@ -189,7 +241,11 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
     runEpoch += 1;
   }
 
-  if (oldVal.controllerLogin === newVal.controllerLogin && oldVal.botLogin === newVal.botLogin) return;
+  if (
+    oldVal.controllerLogin === newVal.controllerLogin &&
+    oldVal.botLogin === newVal.botLogin &&
+    oldVal.peerBotLogin === newVal.peerBotLogin
+  ) return;
 
   void withStateLock(async () => {
     const res = await chrome.storage.local.get(["contextState"]);
@@ -198,7 +254,7 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
     const recentSent = state.recentSentTexts || [];
     const updatedMessages = state.messages.map((m) => ({
       ...m,
-      role: classifyRole(m.author, m.text, newVal.controllerLogin || "", recentSent, newVal.botLogin || "")
+      role: classifyRole(m.author, m.text, newVal.controllerLogin || "", recentSent, newVal.botLogin || "", newVal.peerBotLogin || "")
     }));
     await chrome.storage.local.set({ contextState: { ...state, messages: updatedMessages } });
   });
@@ -447,7 +503,7 @@ async function handleConfirmSendOnce(editedText, isAutoSend = false) {
       if (deliveryStatus === "confirmed" && !wasEdited && draftSnapshot && draftSnapshot.pendingMemoryFact && (sentSoFar % 4 === 0)) {
         const prevMem = Array.isArray(latest.characterMemory) ? latest.characterMemory : [];
         const fact = sanitizeMemoryFact(draftSnapshot.pendingMemoryFact);
-        if (fact && !prevMem.some((f) => f.toLowerCase() === fact.toLowerCase())) {
+        if (fact && factMatchesReply(fact, finalText) && !prevMem.some((f) => f.toLowerCase() === fact.toLowerCase())) {
           updates.characterMemory = [...prevMem, fact].slice(-15);
         }
       }
@@ -530,7 +586,14 @@ async function runDraftGeneration(triggerMessage, contextMessages) {
       nowMs - lastQ >= 270000;
 
     await withStateLock(async () => {
+      const cur = await chrome.storage.local.get(["contextState"]);
+      const curState = { ...DEFAULT_STATE, ...(cur.contextState || {}) };
+      const prevProc = Array.isArray(curState.processedTriggerIds) ? curState.processedTriggerIds : [];
+      const nextProc = triggerMessage && triggerMessage.id && !prevProc.includes(triggerMessage.id)
+        ? [...prevProc, triggerMessage.id].slice(-200)
+        : prevProc;
       await chrome.storage.local.set({
+        contextState: { ...curState, processedTriggerIds: nextProc },
         draftState: {
           ...DEFAULT_DRAFT,
           status: "generating",
@@ -573,6 +636,11 @@ async function runDraftGeneration(triggerMessage, contextMessages) {
         const recentRaw = (Array.isArray(latestState.recentSentTexts) ? latestState.recentSentTexts : []).slice(-4);
         const recentHadEmoji = emojiRe.test(String(triggerMessage.text || "")) || recentRaw.some((t) => emojiRe.test(String(t || "")));
         let cleanResultText = result.text;
+        const botNormSelf = normalizeLogin(latestSettings.botLogin);
+        if (cleanResultText !== "NO_REPLY" && botNormSelf) {
+          const selfMentionRe = new RegExp(`@${botNormSelf}\\b[,:!]*\\s*`, "gi");
+          cleanResultText = cleanResultText.replace(selfMentionRe, "").replace(/\s+/g, " ").trim() || "NO_REPLY";
+        }
         if (cleanResultText !== "NO_REPLY" && recentHadEmoji && emojiRe.test(cleanResultText)) {
           cleanResultText = cleanResultText.replace(emojiRe, "").replace(/\s+/g, " ").trim() || "NO_REPLY";
         }
@@ -580,7 +648,13 @@ async function runDraftGeneration(triggerMessage, contextMessages) {
         const replyNorm = stripForEcho(cleanResultText);
         const triggerNorm = stripForEcho(triggerMessage.text);
         const recentNorms = recentRaw.map(stripForEcho);
-        const isEcho = Boolean(replyNorm && ((triggerNorm && replyNorm === triggerNorm) || recentNorms.includes(replyNorm)));
+        const isParaphrase = Boolean(
+          replyNorm && (
+            wordOverlapRatio(replyNorm, triggerNorm) >= 0.60 ||
+            recentNorms.some((r) => wordOverlapRatio(replyNorm, r) >= 0.60)
+          )
+        );
+        const isEcho = Boolean(replyNorm && ((triggerNorm && replyNorm === triggerNorm) || recentNorms.includes(replyNorm) || isParaphrase));
         const isNoReply = cleanResultText === "NO_REPLY" || isEcho;
 
         const nextDraft = {
@@ -740,7 +814,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           author: String(item.author || "unknown"),
           text: String(item.text || ""),
           timestamp: String(item.timestamp || new Date().toISOString()),
-          role: classifyRole(item.author, item.text, settings.controllerLogin, recentSent, settings.botLogin)
+          role: classifyRole(item.author, item.text, settings.controllerLogin, recentSent, settings.botLogin, settings.peerBotLogin)
         };
         merged.push(normalized);
         newlyAdded.push(normalized);
@@ -751,12 +825,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
       let triggerCandidate = null;
       if (existing.length > 0 && newlyAdded.length > 0) {
-        const controllerMsgs = newlyAdded.filter((m) => m.role === "controller_human");
-        const latestCtrl = controllerMsgs[controllerMsgs.length - 1];
+        const trailingBotTurns = countTrailingBotTurns(merged);
+        const eligibleMsgs = newlyAdded.filter((m) =>
+          m.role === "controller_human" || (m.role === "peer_bot" && trailingBotTurns < 3)
+        );
+        const latestCtrl = eligibleMsgs[eligibleMsgs.length - 1];
         if (
           latestCtrl &&
           !processedSet.has(latestCtrl.id) &&
-          !isExplicitlyAddressedToOther(latestCtrl.text, settings.botLogin)
+          !isExplicitlyAddressedToOther(latestCtrl.text, settings.botLogin, pageChannel)
         ) {
           triggerCandidate = latestCtrl;
           if (!isGenerating) {
@@ -801,7 +878,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             const curAuto = { ...DEFAULT_AUTO, ...(latestAuto.autoExperiment || {}) };
             if (curAuto.enabled && !curAuto.pendingAutoReply) {
               await chrome.storage.local.set({
-                autoExperiment: { ...curAuto, pendingAutoReply: true }
+                autoExperiment: { ...curAuto, pendingAutoReply: true, pendingTriggerId: pendingTrigger.id }
               });
             }
           });
@@ -1003,8 +1080,11 @@ setInterval(() => {
     if (!autoCheck.active || !autoCheck.canSendNow) return;
 
     const processedSet = new Set(Array.isArray(state.processedTriggerIds) ? state.processedTriggerIds : []);
-    const ctrlMsgs = state.messages.filter((m) => m.role === "controller_human");
-    const target = ctrlMsgs[ctrlMsgs.length - 1] || state.messages[state.messages.length - 1];
+    const ctrlMsgs = state.messages.filter((m) => m.role === "controller_human" || m.role === "peer_bot");
+    const pendingTarget = auto.pendingTriggerId
+      ? state.messages.find((m) => m.id === auto.pendingTriggerId)
+      : null;
+    const target = pendingTarget || ctrlMsgs[ctrlMsgs.length - 1] || state.messages[state.messages.length - 1];
     if (!target) return;
 
     if (auto.pendingAutoReply) {
@@ -1012,10 +1092,12 @@ setInterval(() => {
         const latest = await chrome.storage.local.get(["autoExperiment"]);
         const cur = { ...DEFAULT_AUTO, ...(latest.autoExperiment || {}) };
         await chrome.storage.local.set({
-          autoExperiment: { ...cur, pendingAutoReply: false }
+          autoExperiment: { ...cur, pendingAutoReply: false, pendingTriggerId: "" }
         });
       });
-      await runDraftGeneration(target, state.messages);
+      if (!processedSet.has(target.id)) {
+        await runDraftGeneration(target, state.messages);
+      }
       return;
     }
 
