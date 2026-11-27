@@ -7,7 +7,7 @@
   <style>
     :root {
       --text: #161e2b;
-      --muted: #526075;
+      --muted: #4b586e;
       --accent: #0ea5e9;
       --accent-2: #2563eb;
       --err: #dc2626;
@@ -16,20 +16,23 @@
     body {
       margin: 0;
       min-height: 100vh;
-      display: grid;
-      place-items: center;
-      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 18px;
+      padding: 28px 16px 48px;
       font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, sans-serif;
       color: var(--text);
       background:
-        linear-gradient(180deg, rgba(248, 251, 255, 0.5), rgba(241, 245, 250, 0.68)),
+        linear-gradient(180deg, rgba(248, 251, 255, 0.5), rgba(241, 245, 250, 0.72)),
         url("padded_room.jpg") center / cover fixed no-repeat;
     }
     .card {
-      max-width: 480px;
+      max-width: 680px;
       width: 100%;
       text-align: center;
-      background: rgba(255, 255, 255, 0.8);
+      background: rgba(255, 255, 255, 0.82);
       backdrop-filter: blur(16px) saturate(140%);
       -webkit-backdrop-filter: blur(16px) saturate(140%);
       border: 1px solid rgba(15, 23, 42, 0.12);
@@ -92,12 +95,13 @@
       display: none;
       place-items: center;
       padding: 20px;
+      z-index: 20;
     }
     .modal-backdrop.open { display: grid; }
     .modal {
       max-width: 420px;
       width: 100%;
-      background: rgba(255, 255, 255, 0.92);
+      background: rgba(255, 255, 255, 0.94);
       border: 1px solid rgba(15, 23, 42, 0.12);
       border-radius: 22px;
       padding: 24px;
@@ -114,24 +118,68 @@
       justify-content: center;
       flex-wrap: wrap;
     }
-    .steps {
+    .download-banner {
       display: none;
-      margin-top: 20px;
-      text-align: left;
-      background: rgba(255, 255, 255, 0.85);
-      border: 1px solid rgba(15, 23, 42, 0.1);
+      margin-top: 18px;
+      padding: 12px 14px;
       border-radius: 14px;
-      padding: 14px;
+      background: rgba(21, 128, 61, 0.1);
+      border: 1px solid rgba(21, 128, 61, 0.28);
+      color: #166534;
       font-size: 13px;
+      font-weight: 600;
+    }
+    .download-banner.show { display: block; }
+    .guide {
+      text-align: left;
+      margin-top: 24px;
+      padding-top: 20px;
+      border-top: 1px solid rgba(15, 23, 42, 0.1);
+    }
+    .guide h2 {
+      margin: 0 0 14px;
+      font-size: 17px;
+      text-align: center;
+    }
+    .step-box {
+      background: rgba(255, 255, 255, 0.82);
+      border: 1px solid rgba(15, 23, 42, 0.09);
+      border-radius: 16px;
+      padding: 14px 16px;
+      margin-bottom: 12px;
+      font-size: 13.5px;
       line-height: 1.55;
     }
-    .steps.show { display: block; }
-    code {
-      background: rgba(15, 23, 42, 0.07);
-      padding: 1px 5px;
-      border-radius: 5px;
-      font-size: 12px;
+    .step-box:last-child { margin-bottom: 0; }
+    .step-title {
+      font-weight: 700;
+      margin-bottom: 6px;
+      color: var(--text);
     }
+    .step-box ul, .step-box ol {
+      margin: 6px 0 0;
+      padding-left: 18px;
+    }
+    .step-box li { margin-bottom: 4px; }
+    code {
+      background: rgba(15, 23, 42, 0.08);
+      padding: 2px 6px;
+      border-radius: 6px;
+      font-size: 12.5px;
+      font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+      word-break: break-all;
+    }
+    .cmd {
+      display: block;
+      margin: 6px 0;
+      padding: 8px 10px;
+      background: rgba(15, 23, 42, 0.07);
+      border-radius: 10px;
+      font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+      font-size: 12.5px;
+      user-select: all;
+    }
+    a { color: var(--accent-2); }
   </style>
 </head>
 <body>
@@ -141,14 +189,79 @@
     <p>Браузерный ИИ-собеседник для Twitch-чата на базе локальной модели и памяти персонажа.</p>
     <button id="enterBtn" class="pill-btn primary">💉 Вы хотите стать шизофреником?</button>
 
-    <div id="afterDownload" class="steps">
-      <strong>Рецепт выписан! Как установить:</strong>
-      <ol style="margin: 8px 0 0; padding-left: 18px;">
-        <li>Распакуйте скачанный архив <code>Shizics-main.zip</code>.</li>
-        <li>Запустите <code>install_extension.bat</code> (он скопирует путь и откроет <code>chrome://extensions/</code>).</li>
-        <li>Включите <b>Режим разработчика</b> → <b>Загрузить распакованное</b> → вставьте путь (<code>Ctrl+V</code>).</li>
-      </ol>
+    <div id="afterDownload" class="download-banner">
+      ✅ Архив <code>Shizics-main.zip</code> начал скачиваться! Следуйте пошаговой инструкции ниже.
     </div>
+
+    <section class="guide" id="guideSection">
+      <h2>📋 Пошаговая инструкция для чайников</h2>
+
+      <div class="step-box">
+        <div class="step-title">Шаг 1. Установите Ollama (мозги для бота)</div>
+        <ol>
+          <li>Скачайте и установите <a href="https://ollama.com/download" target="_blank" rel="noopener noreferrer">Ollama для Windows</a>.</li>
+          <li>Откройте <b>PowerShell</b> (Поиск Windows → PowerShell) и один раз выполните команду, чтобы Chrome пускал запросы к Ollama:
+            <span class="cmd">setx OLLAMA_ORIGINS "chrome-extension://*"</span>
+          </li>
+          <li>Обязательно <b>полностью перезапустите Ollama</b>: нажмите правой кнопкой по значку ламы у часов (в трее) → <b>Quit Ollama</b>, и запустите Ollama заново из меню Пуск.</li>
+        </ol>
+      </div>
+
+      <div class="step-box">
+        <div class="step-title">Шаг 2. Скачайте модель под ваш компьютер</div>
+        Откройте PowerShell и вставьте <b>одну</b> из команд в зависимости от вашей видеокарты:
+        <ul>
+          <li><b>8 ГБ видеопамяти (GTX 1070, RTX 3060/4060 — оптимально):</b>
+            <span class="cmd">ollama pull qwen3.5:9b</span>
+          </li>
+          <li><b>4–6 ГБ видеопамяти (слабый ПК / ноутбук):</b>
+            <span class="cmd">ollama pull qwen2.5:7b</span>
+            или совсем лёгкую: <code>ollama pull gemma3:4b</code>
+          </li>
+          <li><b>16+ ГБ видеопамяти (мощный ПК):</b>
+            <span class="cmd">ollama pull gpt-oss:20b</span>
+          </li>
+        </ul>
+      </div>
+
+      <div class="step-box">
+        <div class="step-title">Шаг 3. Установите расширение в Chrome</div>
+        <ol>
+          <li>Нажмите кнопку выше и скачайте <code>Shizics-main.zip</code>.</li>
+          <li><b>Распакуйте архив</b> в любую постоянную папку (например, <code>C:\Shizics</code> — <i>не запускайте прямо изнутри ZIP!</i>).</li>
+          <li>Внутри папки запустите <code>install_extension.bat</code> — он сам скопирует нужный путь и откроет страницу расширений Chrome.</li>
+          <li>В правом верхнем углу Chrome включите тумблер <b>«Режим разработчика»</b> → нажмите <b>«Загрузить распакованное расширение»</b> → вставьте путь (<code>Ctrl+V</code>) и нажмите Выбор папки.</li>
+        </ol>
+      </div>
+
+      <div class="step-box">
+        <div class="step-title">Шаг 4. Настройка и запуск на Twitch</div>
+        <ol>
+          <li>Откройте стрим на Twitch (например <code>https://www.twitch.tv/mishakuhn</code>) и нажмите на иконку 💊 в правом верхнем углу браузера.</li>
+          <li>Заполните поля:
+            <ul>
+              <li><b>Разрешённый канал:</b> <code>mishakuhn</code> (логин без <code>#</code>)</li>
+              <li><b>Управляющие пользователи:</b> ники через запятую, на кого отвечать</li>
+              <li><b>Аккаунт бота:</b> ваш собственный ник на Twitch</li>
+              <li><b>Провайдер:</b> <code>Ollama (локально, без лимитов)</code></li>
+              <li><b>URL сервера модели:</b> <code>http://localhost:11434</code></li>
+              <li><b>Модель:</b> имя скачанной модели (например <code>qwen3.5:9b</code> или <code>gpt-oss:20b</code>)</li>
+            </ul>
+          </li>
+          <li>Выберите шаблон личности (например, «Лёша» или «Архивариус нижнего интернета»).</li>
+          <li>Нажмите <b>«💊 Сохранить настройки»</b> → <b>«Старт»</b> → <b>«💊 Включить авторежим»</b>.</li>
+        </ol>
+      </div>
+
+      <div class="step-box">
+        <div class="step-title">Шаг 5. Как обновлять расширение потом</div>
+        <ol>
+          <li>Откройте корневую папку <code>Shizics-main</code> (на один уровень выше <code>browser_extension</code>) и запустите <code>update_extension.bat</code>.</li>
+          <li>Зайдите в <code>chrome://extensions/</code> и нажмите круглую стрелку <b>«Обновить»</b> на карточке «Шизофрения».</li>
+          <li>Нажмите <b>F5</b> на вкладке с Twitch.</li>
+        </ol>
+      </div>
+    </section>
   </main>
 
   <div id="confirmModal" class="modal-backdrop" role="dialog" aria-modal="true">
@@ -184,6 +297,7 @@
       document.body.appendChild(a);
       a.click();
       a.remove();
+      afterBox.scrollIntoView({ behavior: "smooth", block: "nearest" });
     });
   </script>
 </body>

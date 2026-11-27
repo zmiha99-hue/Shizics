@@ -72,9 +72,9 @@ const DEFAULT_AUTO = {
   startedAt: null,
   expiresAt: null,
   sentCount: 0,
-  maxMessages: 100,
-  minIntervalSec: 20,
-  durationMin: 15,
+  maxMessages: 300,
+  minIntervalSec: 6,
+  durationMin: 30,
   lastSentAt: null,
   nextAllowedAt: null,
   recentAutoTimestamps: [],
@@ -240,10 +240,12 @@ async function stopAutoExperiment(reason, pauseRunState = false) {
 }
 
 function computeNextAllowedAt(minIntervalSec = 0) {
-  // Protective pacing interval between sends: never shorter than minIntervalSec.
+  // Protective pacing interval between sends: never shorter than minIntervalSec,
+  // with occasional 25-65s natural AFK pauses (~10% chance).
   const minMs = Math.max(0, Number(minIntervalSec) || 0) * 1000;
-  const jitterMs = 4000 + Math.floor(Math.random() * 7000);
-  return Date.now() + Math.max(minMs, jitterMs);
+  const jitterMs = 4000 + Math.floor(Math.random() * 8000);
+  const afkBreakMs = Math.random() < 0.10 ? (25000 + Math.floor(Math.random() * 40000)) : 0;
+  return Date.now() + Math.max(minMs, jitterMs) + afkBreakMs;
 }
 
 async function enforceAutoLimits() {
@@ -258,7 +260,7 @@ async function enforceAutoLimits() {
 
   const now = Date.now();
   if (auto.expiresAt && now >= auto.expiresAt) {
-    await stopAutoExperiment("Авторежим остановлен по таймеру (15 минут).");
+    await stopAutoExperiment("Авторежим остановлен по таймеру (30 минут).");
     return { active: false, canSendNow: false, auto: { ...auto, enabled: false } };
   }
   if (auto.sentCount >= auto.maxMessages) {
@@ -266,7 +268,7 @@ async function enforceAutoLimits() {
     return { active: false, canSendNow: false, auto: { ...auto, enabled: false } };
   }
 
-  const perMinuteCap = Math.max(1, Math.ceil(auto.maxMessages / (auto.durationMin || 15)));
+  const perMinuteCap = Math.max(1, Math.ceil(auto.maxMessages / (auto.durationMin || 30)));
   const recentInMinute = (Array.isArray(auto.recentAutoTimestamps) ? auto.recentAutoTimestamps : [])
     .filter((ts) => now - ts < 60000);
 
@@ -363,7 +365,9 @@ async function handleConfirmSendOnce(editedText, isAutoSend = false) {
     }
 
     if (isAutoSend) {
-      const typingDelayMs = 3000 + Math.min(4500, finalText.length * 45);
+      const thinkMs = 2500 + Math.floor(Math.random() * 4000);
+      const typeMs = Math.min(5500, finalText.length * 55);
+      const typingDelayMs = thinkMs + typeMs;
       const sendEpoch = runEpoch;
       await new Promise((r) => setTimeout(r, typingDelayMs));
       const recheck = await chrome.storage.local.get(["settings"]);
@@ -856,9 +860,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       const now = Date.now();
       const durationMs = DEFAULT_AUTO.durationMin * 60 * 1000;
       const reqMax = Number(message.maxMessages);
-      const maxMessages = [10, 30, 45, 60, 100].includes(reqMax) ? reqMax : DEFAULT_AUTO.maxMessages;
+      const maxMessages = [30, 60, 120, 180, 300].includes(reqMax) ? reqMax : DEFAULT_AUTO.maxMessages;
       const reqInterval = Number(message.minIntervalSec);
-      const minIntervalSec = [20, 30, 60].includes(reqInterval) ? reqInterval : DEFAULT_AUTO.minIntervalSec;
+      const minIntervalSec = [6, 10, 15, 30, 60].includes(reqInterval) ? reqInterval : DEFAULT_AUTO.minIntervalSec;
 
       const nextAuto = {
         ...DEFAULT_AUTO,
@@ -875,7 +879,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         clearTimeout(autoStopTimer);
       }
       autoStopTimer = setTimeout(() => {
-        void stopAutoExperiment("Авторежим остановлен по таймеру (15 минут).");
+        void stopAutoExperiment("Авторежим остановлен по таймеру (30 минут).");
       }, durationMs);
 
       await chrome.storage.local.set({ autoExperiment: nextAuto });

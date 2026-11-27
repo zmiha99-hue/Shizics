@@ -12,7 +12,7 @@ let personaExpanded = false;
 let autoUiError = "";
 
 function formatRemaining(expiresAt) {
-  if (!expiresAt) return "15:00";
+  if (!expiresAt) return "30:00";
   const sec = Math.max(0, Math.floor((expiresAt - Date.now()) / 1000));
   const mm = String(Math.floor(sec / 60)).padStart(2, "0");
   const ss = String(sec % 60).padStart(2, "0");
@@ -35,8 +35,8 @@ function renderAutoSection(auto) {
   sendBadge.className = `pill ${enabled ? "ok" : "warn"}`;
 
   const sent = (auto && auto.sentCount) || 0;
-  const maxMsg = (auto && auto.maxMessages) || 100;
-  const rem = enabled ? formatRemaining(auto.expiresAt) : "15:00";
+  const maxMsg = (auto && auto.maxMessages) || 300;
+  const rem = enabled ? formatRemaining(auto.expiresAt) : "30:00";
   autoCounters.textContent = `Отправлено: ${sent} / ${maxMsg} · Осталось: ${rem}`;
 
   toggleBtn.textContent = enabled ? "Остановить авторежим" : "Включить авторежим";
@@ -419,9 +419,9 @@ document.getElementById("clearKeyBtn").addEventListener("click", () => {
 
 document.getElementById("toggleAutoBtn").addEventListener("click", () => {
   const enable = !Boolean(currentAutoState && currentAutoState.enabled);
-  const [maxStr, intStr] = String(document.getElementById("autoPresetSelect").value || "100:20").split(":");
-  const maxMessages = Number(maxStr) || 100;
-  const minIntervalSec = Number(intStr) || 20;
+  const [maxStr, intStr] = String(document.getElementById("autoPresetSelect").value || "300:6").split(":");
+  const maxMessages = Number(maxStr) || 300;
+  const minIntervalSec = Number(intStr) || 6;
   chrome.runtime.sendMessage(
     { type: "TOGGLE_AUTO_MODE", enabled: enable, maxMessages, minIntervalSec },
     (resp) => {
