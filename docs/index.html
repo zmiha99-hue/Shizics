@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Шизофрения · Палата №1</title>
+  <style>
+    :root {
+      --text: #161e2b;
+      --muted: #526075;
+      --accent: #0ea5e9;
+      --accent-2: #2563eb;
+      --err: #dc2626;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      padding: 20px;
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, sans-serif;
+      color: var(--text);
+      background:
+        linear-gradient(180deg, rgba(248, 251, 255, 0.5), rgba(241, 245, 250, 0.68)),
+        url("padded_room.jpg") center / cover fixed no-repeat;
+    }
+    .card {
+      max-width: 480px;
+      width: 100%;
+      text-align: center;
+      background: rgba(255, 255, 255, 0.8);
+      backdrop-filter: blur(16px) saturate(140%);
+      -webkit-backdrop-filter: blur(16px) saturate(140%);
+      border: 1px solid rgba(15, 23, 42, 0.12);
+      border-radius: 24px;
+      padding: 32px 26px;
+      box-shadow: 0 20px 50px rgba(15, 23, 42, 0.14), inset 0 1px 0 rgba(255, 255, 255, 0.9);
+    }
+    .badge {
+      display: inline-block;
+      padding: 4px 12px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 600;
+      background: rgba(255, 255, 255, 0.85);
+      border: 1px solid rgba(15, 23, 42, 0.1);
+      color: var(--muted);
+      margin-bottom: 14px;
+    }
+    h1 {
+      margin: 0 0 10px;
+      font-size: 28px;
+      letter-spacing: -0.02em;
+    }
+    p {
+      margin: 0 0 22px;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.5;
+    }
+    .pill-btn {
+      border: 1px solid rgba(15, 23, 42, 0.14);
+      border-radius: 999px;
+      padding: 12px 24px;
+      font-size: 15px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: transform 0.1s ease, box-shadow 0.15s ease;
+    }
+    .pill-btn:active { transform: scale(0.98); }
+    .pill-btn.primary {
+      background: linear-gradient(90deg, var(--accent) 0%, var(--accent-2) 100%);
+      color: #fff;
+      border-color: rgba(37, 99, 235, 0.4);
+      box-shadow: 0 8px 20px rgba(37, 99, 235, 0.28);
+    }
+    .pill-btn.secondary {
+      background: rgba(255, 255, 255, 0.9);
+      color: var(--text);
+    }
+    .pill-btn.danger {
+      background: linear-gradient(90deg, #ef4444 0%, #dc2626 100%);
+      color: #fff;
+      border-color: rgba(220, 38, 38, 0.4);
+    }
+    .modal-backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(15, 23, 42, 0.42);
+      backdrop-filter: blur(6px);
+      display: none;
+      place-items: center;
+      padding: 20px;
+    }
+    .modal-backdrop.open { display: grid; }
+    .modal {
+      max-width: 420px;
+      width: 100%;
+      background: rgba(255, 255, 255, 0.92);
+      border: 1px solid rgba(15, 23, 42, 0.12);
+      border-radius: 22px;
+      padding: 24px;
+      text-align: center;
+      box-shadow: 0 24px 60px rgba(15, 23, 42, 0.25);
+    }
+    .modal h2 {
+      margin: 0 0 10px;
+      font-size: 20px;
+    }
+    .actions {
+      display: flex;
+      gap: 10px;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+    .steps {
+      display: none;
+      margin-top: 20px;
+      text-align: left;
+      background: rgba(255, 255, 255, 0.85);
+      border: 1px solid rgba(15, 23, 42, 0.1);
+      border-radius: 14px;
+      padding: 14px;
+      font-size: 13px;
+      line-height: 1.55;
+    }
+    .steps.show { display: block; }
+    code {
+      background: rgba(15, 23, 42, 0.07);
+      padding: 1px 5px;
+      border-radius: 5px;
+      font-size: 12px;
+    }
+  </style>
+</head>
+<body>
+  <main class="card">
+    <div class="badge">🏥 Палата №1 · Учебный стенд</div>
+    <h1>💊 Шизофрения</h1>
+    <p>Браузерный ИИ-собеседник для Twitch-чата на базе локальной модели и памяти персонажа.</p>
+    <button id="enterBtn" class="pill-btn primary">💉 Вы хотите стать шизофреником?</button>
+
+    <div id="afterDownload" class="steps">
+      <strong>Рецепт выписан! Как установить:</strong>
+      <ol style="margin: 8px 0 0; padding-left: 18px;">
+        <li>Распакуйте скачанный архив <code>Shizics-main.zip</code>.</li>
+        <li>Запустите <code>install_extension.bat</code> (он скопирует путь и откроет <code>chrome://extensions/</code>).</li>
+        <li>Включите <b>Режим разработчика</b> → <b>Загрузить распакованное</b> → вставьте путь (<code>Ctrl+V</code>).</li>
+      </ol>
+    </div>
+  </main>
+
+  <div id="confirmModal" class="modal-backdrop" role="dialog" aria-modal="true">
+    <div class="modal">
+      <h2>💊 Предупреждение</h2>
+      <p>Точно хотите стать шизофреником? Вы больше не сможете общаться с людьми.</p>
+      <div class="actions">
+        <button id="confirmYesBtn" class="pill-btn danger">💊 Да, скачать</button>
+        <button id="confirmNoBtn" class="pill-btn secondary">💉 Отмена</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const modal = document.getElementById("confirmModal");
+    const afterBox = document.getElementById("afterDownload");
+    const ZIP_URL = "https://github.com/zmiha99-hue/Shizics/archive/refs/heads/main.zip";
+
+    document.getElementById("enterBtn").addEventListener("click", () => {
+      modal.classList.add("open");
+    });
+
+    document.getElementById("confirmNoBtn").addEventListener("click", () => {
+      modal.classList.remove("open");
+    });
+
+    document.getElementById("confirmYesBtn").addEventListener("click", () => {
+      modal.classList.remove("open");
+      afterBox.classList.add("show");
+      const a = document.createElement("a");
+      a.href = ZIP_URL;
+      a.download = "Shizics-main.zip";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    });
+  </script>
+</body>
+</html>
