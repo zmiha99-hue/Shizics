@@ -18,8 +18,8 @@ if %errorlevel%==0 (
 )
 
 echo Git не найден — скачиваю архив с GitHub...
-set "ZIP_FILE=%TEMP%\shizics_main.zip"
-set "EXTRACT_DIR=%TEMP%\shizics_extract"
+set "ZIP_FILE=%TEMP%\shizics_%RANDOM%.zip"
+set "EXTRACT_DIR=%TEMP%\shizics_extract_%RANDOM%"
 set "ZIP_URL=https://github.com/zmiha99-hue/Shizics/archive/refs/heads/main.zip"
 
 if exist "%ZIP_FILE%" del /f /q "%ZIP_FILE%" >nul 2>&1
