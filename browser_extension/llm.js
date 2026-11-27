@@ -12,7 +12,7 @@ const DEFAULT_PERSONA_PROMPT = [
 
 function isChatCommand(text) {
   const trimmed = String(text || "").trim();
-  return trimmed.startsWith("/") || trimmed.startsWith(".");
+  return trimmed.startsWith("/") || trimmed.startsWith(".") || trimmed.startsWith("!");
 }
 
 function looksLikeRawJson(text) {
@@ -109,11 +109,19 @@ function buildAlternatingTurns(messages, triggerMessage) {
     }
   }
 
+  while (turns.length > 0 && turns[0].role === "assistant") {
+    turns.shift();
+  }
+
   // Always end with a separate, explicit final user turn for the trigger message.
   if (triggerMessage) {
+    const tAuthor = String(triggerMessage.author || "").trim();
+    const tText = String(triggerMessage.text || "").trim();
     turns.push({
       role: "user",
-      content: `Ответь на это сообщение — ${triggerMessage.author}: ${triggerMessage.text}`
+      content: (tAuthor || tText)
+        ? `Ответь на это сообщение — ${tAuthor}: ${tText}`
+        : "Чат немного затих — коротко и естественно поддержи беседу по контексту выше, не повторяя старые ответы."
     });
   }
   return turns;

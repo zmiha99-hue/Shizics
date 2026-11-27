@@ -27,6 +27,7 @@ const DEFAULT_STATE = {
   tabId: null,
   dedupCount: 0,
   messages: [],
+  seenIds: [],
   recentSentTexts: [],
   ignoredIds: [],
   processedTriggerIds: [],
@@ -238,10 +239,11 @@ async function stopAutoExperiment(reason, pauseRunState = false) {
   });
 }
 
-function computeNextAllowedAt() {
-  // Natural human-like reading/typing delay between replies: 4..11 seconds.
+function computeNextAllowedAt(minIntervalSec = 0) {
+  // Protective pacing interval between sends: never shorter than minIntervalSec.
+  const minMs = Math.max(0, Number(minIntervalSec) || 0) * 1000;
   const jitterMs = 4000 + Math.floor(Math.random() * 7000);
-  return Date.now() + jitterMs;
+  return Date.now() + Math.max(minMs, jitterMs);
 }
 
 async function enforceAutoLimits() {
@@ -314,8 +316,8 @@ async function handleConfirmSendOnce(editedText, isAutoSend = false) {
         prepError = "Отправка запрещена в текущем состоянии (Пауза/Стоп).";
         return;
       }
-      if (draft.status === "sending" || draft.status === "sent_confirmed") {
-        prepError = "Этот черновик уже отправлен или отправляется.";
+      if (draft.status === "sending" || draft.status === "sent_confirmed" || draft.status === "sent_uncertain") {
+        prepError = "Этот черновик уже отправлен, отправляется или имеет неподтверждённый статус (uncertain). Сбросьте черновик перед новой отправкой.";
         return;
       }
       if (!state.channelAllowed || !state.tabId) {
@@ -434,7 +436,10 @@ async function handleConfirmSendOnce(editedText, isAutoSend = false) {
         };
       }
 
-      if (deliveryStatus === "confirmed" && draftSnapshot && draftSnapshot.pendingMemoryFact) {
+      const wasEdited = Boolean(
+        editedText && draftSnapshot && normalizeTextForMatch(editedText) !== normalizeTextForMatch(draftSnapshot.text)
+      );
+      if (deliveryStatus === "confirmed" && !wasEdited && draftSnapshot && draftSnapshot.pendingMemoryFact) {
         const prevMem = Array.isArray(latest.characterMemory) ? latest.characterMemory : [];
         const fact = sanitizeMemoryFact(draftSnapshot.pendingMemoryFact);
         if (fact && !prevMem.some((f) => f.toLowerCase() === fact.toLowerCase())) {
@@ -472,7 +477,7 @@ async function handleConfirmSendOnce(editedText, isAutoSend = false) {
               ...auto,
               sentCount: nextCount,
               lastSentAt: nowSent,
-              nextAllowedAt: computeNextAllowedAt(),
+              nextAllowedAt: computeNextAllowedAt(auto.minIntervalSec),
               recentAutoTimestamps: [...prevRecent, nowSent],
               pendingAutoReply: false
             }
@@ -657,7 +662,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
     const tabId = sender && sender.tab ? sender.tab.id : null;
 
-    void withStateLock(async () => {
+    void (async () => {
+      let pendingTrigger = null;
+      let pendingContext = null;
+
+      await withStateLock(async () => {
       const res = await chrome.storage.local.get(["settings", "contextState"]);
       const settings = { ...DEFAULT_SETTINGS, ...(res.settings || {}) };
       const prev = { ...DEFAULT_STATE, ...(res.contextState || {}) };
@@ -690,11 +699,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
       const incoming = Array.isArray(message.messages) ? message.messages : [];
       const existing = Array.isArray(prev.messages) && prev.channel === pageChannel ? prev.messages : [];
+      const prevSeenIds = Array.isArray(prev.seenIds) && prev.channel === pageChannel ? prev.seenIds : [];
       const recentSent = Array.isArray(prev.recentSentTexts) ? prev.recentSentTexts : [];
       const ignoredList = Array.isArray(prev.ignoredIds) && prev.channel === pageChannel ? prev.ignoredIds : [];
       const processedList = Array.isArray(prev.processedTriggerIds) && prev.channel === pageChannel ? prev.processedTriggerIds : [];
       const ignoredSet = new Set(ignoredList);
-      const seen = new Set(existing.map((m) => m.id));
+      const seen = new Set([...prevSeenIds, ...existing.map((m) => m.id)]);
       const processedSet = new Set(processedList);
       let dedupAdded = 0;
       const newlyAdded = [];
@@ -732,7 +742,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           !isExplicitlyAddressedToOther(latestCtrl.text, settings.botLogin)
         ) {
           triggerCandidate = latestCtrl;
-          processedList.push(latestCtrl.id);
+          if (!isGenerating) {
+            processedList.push(latestCtrl.id);
+          }
         }
       }
 
@@ -743,6 +755,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         tabId,
         recentSentTexts: recentSent,
         ignoredIds: ignoredList,
+        seenIds: Array.from(seen).slice(-600),
         processedTriggerIds: processedList.slice(-200),
         lastQuestionAt: prev.lastQuestionAt || null,
         lastActivityAt: newlyAdded.length > 0 ? Date.now() : (prev.lastActivityAt || Date.now()),
@@ -758,21 +771,28 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       sendResponse({ ok: true, channelAllowed: true, count: trimmed.length });
 
       if (triggerCandidate) {
+        pendingTrigger = triggerCandidate;
+        pendingContext = trimmed;
+      }
+      });
+
+      if (pendingTrigger && pendingContext) {
         const autoCheck = await enforceAutoLimits();
-        if (autoCheck.active && !autoCheck.canSendNow) {
-          // Still in >20s cooldown: keep reading context and reply once cooldown + jitter elapses.
-          const latestAuto = await chrome.storage.local.get(["autoExperiment"]);
-          const curAuto = { ...DEFAULT_AUTO, ...(latestAuto.autoExperiment || {}) };
-          if (curAuto.enabled && !curAuto.pendingAutoReply) {
-            await chrome.storage.local.set({
-              autoExperiment: { ...curAuto, pendingAutoReply: true }
-            });
-          }
+        if ((autoCheck.active && !autoCheck.canSendNow) || isGenerating) {
+          await withStateLock(async () => {
+            const latestAuto = await chrome.storage.local.get(["autoExperiment"]);
+            const curAuto = { ...DEFAULT_AUTO, ...(latestAuto.autoExperiment || {}) };
+            if (curAuto.enabled && !curAuto.pendingAutoReply) {
+              await chrome.storage.local.set({
+                autoExperiment: { ...curAuto, pendingAutoReply: true }
+              });
+            }
+          });
         } else {
-          void runDraftGeneration(triggerCandidate, trimmed);
+          void runDraftGeneration(pendingTrigger, pendingContext);
         }
       }
-    });
+    })();
     return true;
   }
 
@@ -947,6 +967,7 @@ setInterval(() => {
     const autoCheck = await enforceAutoLimits();
     if (!autoCheck.active || !autoCheck.canSendNow) return;
 
+    const processedSet = new Set(Array.isArray(state.processedTriggerIds) ? state.processedTriggerIds : []);
     const ctrlMsgs = state.messages.filter((m) => m.role === "controller_human");
     const target = ctrlMsgs[ctrlMsgs.length - 1] || state.messages[state.messages.length - 1];
     if (!target) return;
@@ -977,6 +998,9 @@ setInterval(() => {
       });
     });
 
-    await runDraftGeneration(target, state.messages);
+    const proactiveTarget = processedSet.has(target.id)
+      ? { id: `proactive-${now}`, author: "", text: "", timestamp: new Date(now).toISOString() }
+      : target;
+    await runDraftGeneration(proactiveTarget, state.messages);
   })();
 }, 3000);
