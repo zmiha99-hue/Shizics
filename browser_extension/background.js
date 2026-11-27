@@ -443,7 +443,8 @@ async function handleConfirmSendOnce(editedText, isAutoSend = false) {
       const wasEdited = Boolean(
         editedText && draftSnapshot && normalizeTextForMatch(editedText) !== normalizeTextForMatch(draftSnapshot.text)
       );
-      if (deliveryStatus === "confirmed" && !wasEdited && draftSnapshot && draftSnapshot.pendingMemoryFact) {
+      const sentSoFar = Array.isArray(latestState.recentSentTexts) ? latestState.recentSentTexts.length : 0;
+      if (deliveryStatus === "confirmed" && !wasEdited && draftSnapshot && draftSnapshot.pendingMemoryFact && (sentSoFar % 4 === 0)) {
         const prevMem = Array.isArray(latest.characterMemory) ? latest.characterMemory : [];
         const fact = sanitizeMemoryFact(draftSnapshot.pendingMemoryFact);
         if (fact && !prevMem.some((f) => f.toLowerCase() === fact.toLowerCase())) {
