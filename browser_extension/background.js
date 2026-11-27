@@ -568,17 +568,24 @@ async function runDraftGeneration(triggerMessage, contextMessages) {
 
         const prevStats = { ...DEFAULT_LLM_STATS, ...(latest.llmStats || {}) };
         const latestState = { ...DEFAULT_STATE, ...(latest.contextState || {}) };
+        const emojiRe = /[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/gu;
+        const recentRaw = (Array.isArray(latestState.recentSentTexts) ? latestState.recentSentTexts : []).slice(-4);
+        const recentHadEmoji = emojiRe.test(String(triggerMessage.text || "")) || recentRaw.some((t) => emojiRe.test(String(t || "")));
+        let cleanResultText = result.text;
+        if (cleanResultText !== "NO_REPLY" && recentHadEmoji && emojiRe.test(cleanResultText)) {
+          cleanResultText = cleanResultText.replace(emojiRe, "").replace(/\s+/g, " ").trim() || "NO_REPLY";
+        }
         const stripForEcho = (s) => String(s || "").replace(/^\[AI\]\s*/i, "").replace(/[^\p{L}\p{N}\s]/gu, "").replace(/\s+/g, " ").trim().toLowerCase();
-        const replyNorm = stripForEcho(result.text);
+        const replyNorm = stripForEcho(cleanResultText);
         const triggerNorm = stripForEcho(triggerMessage.text);
-        const recentNorms = (Array.isArray(latestState.recentSentTexts) ? latestState.recentSentTexts : []).slice(-5).map(stripForEcho);
+        const recentNorms = recentRaw.map(stripForEcho);
         const isEcho = Boolean(replyNorm && ((triggerNorm && replyNorm === triggerNorm) || recentNorms.includes(replyNorm)));
-        const isNoReply = result.text === "NO_REPLY" || isEcho;
+        const isNoReply = cleanResultText === "NO_REPLY" || isEcho;
 
         const nextDraft = {
           draftId: `draft_${Date.now()}`,
           status: isNoReply ? "no_reply" : "preview",
-          text: isNoReply ? "" : result.text,
+          text: isNoReply ? "" : cleanResultText,
           pendingMemoryFact: isNoReply ? "" : (result.memoryFact || ""),
           triggerMessageId: triggerMessage.id,
           triggerAuthor: triggerMessage.author,
