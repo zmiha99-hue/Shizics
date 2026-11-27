@@ -40,7 +40,7 @@ function buildSystemPrompt(
   const botIdHint = botLogin
     ? `Твой ник на Twitch: ${botLogin} (в чате к тебе могут обращаться и по-русски, например транслитом вроде «Кокаину», или по имени из личности).`
     : "";
-  const memList = Array.isArray(characterMemory) ? characterMemory.filter(Boolean).slice(-15) : [];
+  const memList = Array.isArray(characterMemory) ? characterMemory.filter(Boolean).slice(-5) : [];
   const memoryHint = memList.length > 0
     ? `ФАКТЫ, КОТОРЫЕ ТЫ УЖЕ ПРИДУМАЛ О СЕБЕ (держись их, но НЕ повторяй в каждом сообщении без повода):\n${memList.map((f) => `- ${f}`).join("\n")}`
     : "";
@@ -267,8 +267,8 @@ async function generateWithOllama(endpointUrl, model, personaPrompt, messages, t
     ...chatTurns
   ];
 
-  const isThinkingModel = /qwen3|deepseek-r1|qwq/i.test(chosenModel);
-  const buildPayload = (includeThinkFalse) => {
+  const isThinkingModel = /qwen3|deepseek-r1|qwq|gpt-oss/i.test(chosenModel);
+  const buildPayload = (thinkValue) => {
     const p = {
       model: chosenModel,
       stream: false,
@@ -278,11 +278,11 @@ async function generateWithOllama(endpointUrl, model, personaPrompt, messages, t
         top_p: 0.9,
         repeat_penalty: 1.12,
         num_ctx: 4096,
-        num_predict: deepThink ? 320 : 140
+        num_predict: deepThink ? 420 : 180
       }
     };
-    if (includeThinkFalse) {
-      p.think = false;
+    if (thinkValue !== undefined) {
+      p.think = thinkValue;
     }
     if (deepThink) {
       p.format = {
@@ -300,7 +300,7 @@ async function generateWithOllama(endpointUrl, model, personaPrompt, messages, t
 
   const fetchWithTimeout = async (payloadObj) => {
     const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
-    const timer = controller ? setTimeout(() => controller.abort(), 60000) : null;
+    const timer = controller ? setTimeout(() => controller.abort(), 90000) : null;
     try {
       return await fetch(url, {
         method: "POST",
@@ -315,11 +315,11 @@ async function generateWithOllama(endpointUrl, model, personaPrompt, messages, t
 
   let response;
   try {
-    response = await fetchWithTimeout(buildPayload(isThinkingModel));
+    response = await fetchWithTimeout(buildPayload(isThinkingModel ? false : undefined));
   } catch (err) {
     if (err && err.name === "AbortError") {
       throw new Error(
-        `Ollama (${chosenModel}) не ответила за 60 сек. Попробуйте модель полегче (например qwen2.5:7b или gemma3:4b).`
+        `Ollama (${chosenModel}) не ответила за 90 сек. Попробуйте модель полегче (например qwen3.5:9b или qwen2.5:7b).`
       );
     }
     throw new Error(
@@ -335,8 +335,9 @@ async function generateWithOllama(endpointUrl, model, personaPrompt, messages, t
   }
 
   if (!response.ok && isThinkingModel && response.status === 400) {
+    const fallbackThink = /gpt-oss/i.test(chosenModel) ? "low" : undefined;
     try {
-      response = await fetchWithTimeout(buildPayload(false));
+      response = await fetchWithTimeout(buildPayload(fallbackThink));
       data = await response.json().catch(() => ({}));
     } catch (_err) {
       // fall through to standard error handling below

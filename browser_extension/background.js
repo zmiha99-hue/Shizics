@@ -881,6 +881,24 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       await chrome.storage.local.set({ autoExperiment: nextAuto });
       sendResponse({ ok: true });
     });
+
+    // Kick off immediately if there is an existing preview draft or an unanswered controller message.
+    void (async () => {
+      if (isGenerating || isSending) return;
+      const latest = await chrome.storage.local.get(["contextState", "draftState"]);
+      const st = { ...DEFAULT_STATE, ...(latest.contextState || {}) };
+      const dr = { ...DEFAULT_DRAFT, ...(latest.draftState || {}) };
+      if (dr.status === "preview" && dr.text) {
+        void handleConfirmSendOnce(dr.text, true);
+      } else if (Array.isArray(st.messages) && st.messages.length > 0) {
+        const processed = new Set(Array.isArray(st.processedTriggerIds) ? st.processedTriggerIds : []);
+        const ctrlMsgs = st.messages.filter((m) => m.role === "controller_human" && !processed.has(m.id));
+        const target = ctrlMsgs[ctrlMsgs.length - 1];
+        if (target) {
+          void runDraftGeneration(target, st.messages);
+        }
+      }
+    })();
     return true;
   }
 
