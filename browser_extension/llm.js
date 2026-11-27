@@ -257,38 +257,61 @@ async function generateWithOllama(endpointUrl, model, personaPrompt, messages, t
     ...chatTurns
   ];
 
-  const payload = {
-    model: chosenModel,
-    stream: false,
-    messages: ollamaMessages,
-    options: {
-      temperature: 0.55,
-      top_p: 0.85,
-      repeat_penalty: 1.05,
-      num_ctx: 4096,
-      num_predict: deepThink ? 320 : 140
+  const isThinkingModel = /qwen3|deepseek-r1|qwq/i.test(chosenModel);
+  const buildPayload = (includeThinkFalse) => {
+    const p = {
+      model: chosenModel,
+      stream: false,
+      messages: ollamaMessages,
+      options: {
+        temperature: 0.55,
+        top_p: 0.85,
+        repeat_penalty: 1.05,
+        num_ctx: 4096,
+        num_predict: deepThink ? 320 : 140
+      }
+    };
+    if (includeThinkFalse) {
+      p.think = false;
+    }
+    if (deepThink) {
+      p.format = {
+        type: "object",
+        properties: {
+          thought: { type: "string" },
+          reply: { type: "string" },
+          memory_fact: { type: "string" }
+        },
+        required: ["thought", "reply", "memory_fact"]
+      };
+    }
+    return p;
+  };
+
+  const fetchWithTimeout = async (payloadObj) => {
+    const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
+    const timer = controller ? setTimeout(() => controller.abort(), 60000) : null;
+    try {
+      return await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payloadObj),
+        signal: controller ? controller.signal : undefined
+      });
+    } finally {
+      if (timer) clearTimeout(timer);
     }
   };
-  if (deepThink) {
-    payload.format = {
-      type: "object",
-      properties: {
-        thought: { type: "string" },
-        reply: { type: "string" },
-        memory_fact: { type: "string" }
-      },
-      required: ["thought", "reply", "memory_fact"]
-    };
-  }
 
   let response;
   try {
-    response = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload)
-    });
-  } catch (_err) {
+    response = await fetchWithTimeout(buildPayload(isThinkingModel));
+  } catch (err) {
+    if (err && err.name === "AbortError") {
+      throw new Error(
+        `Ollama (${chosenModel}) не ответила за 60 сек. Попробуйте модель полегче (например qwen2.5:7b или gemma3:4b).`
+      );
+    }
     throw new Error(
       `Не удалось подключиться к локальной Ollama (${base}). Убедитесь, что Ollama запущена и модель '${chosenModel}' скачана.`
     );
@@ -299,6 +322,15 @@ async function generateWithOllama(endpointUrl, model, personaPrompt, messages, t
     data = await response.json();
   } catch (_err) {
     data = {};
+  }
+
+  if (!response.ok && isThinkingModel && response.status === 400) {
+    try {
+      response = await fetchWithTimeout(buildPayload(false));
+      data = await response.json().catch(() => ({}));
+    } catch (_err) {
+      // fall through to standard error handling below
+    }
   }
 
   if (!response.ok) {
