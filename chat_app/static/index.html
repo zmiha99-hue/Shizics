@@ -1,0 +1,271 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Контекстный чат-стенд (локальный / Twitch)</title>
+  <style>
+    :root {
+      --bg: #0f1218;
+      --card: #181c24;
+      --border: #2a303d;
+      --text: #e6ebf2;
+      --muted: #98a2b3;
+      --accent: #7c5cff;
+      --ok: #22c55e;
+      --warn: #f59e0b;
+      --err: #ef4444;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; padding: 20px;
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      background: var(--bg); color: var(--text);
+    }
+    h1, h2 { margin: 0 0 12px; font-weight: 600; }
+    h1 { font-size: 20px; }
+    h2 { font-size: 15px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+    .grid {
+      display: grid;
+      grid-template-columns: 1.2fr 1fr;
+      gap: 16px;
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 16px;
+    }
+    .full { grid-column: 1 / -1; }
+    .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+    .pill {
+      padding: 3px 9px; border-radius: 999px; font-size: 12px;
+      border: 1px solid var(--border); background: #11151d;
+    }
+    .pill.ok { border-color: var(--ok); color: var(--ok); }
+    .pill.warn { border-color: var(--warn); color: var(--warn); }
+    .pill.err { border-color: var(--err); color: var(--err); }
+    button {
+      background: var(--accent); color: #fff; border: 0;
+      border-radius: 6px; padding: 7px 12px; cursor: pointer; font-size: 13px;
+    }
+    button.secondary { background: #262c38; }
+    button.danger { background: var(--err); }
+    button.warn { background: var(--warn); color: #111; }
+    input, textarea, select {
+      background: #11151d; color: var(--text);
+      border: 1px solid var(--border); border-radius: 6px;
+      padding: 7px 9px; font-size: 13px; width: 100%;
+    }
+    label { font-size: 12px; color: var(--muted); display: block; margin-bottom: 4px; }
+    .feed {
+      max-height: 300px; overflow-y: auto;
+      display: flex; flex-direction: column; gap: 8px;
+      margin-bottom: 12px;
+    }
+    .msg {
+      background: #11151d; border: 1px solid var(--border);
+      border-radius: 6px; padding: 8px 10px; font-size: 13px;
+    }
+    .msg .meta { font-size: 11px; color: var(--muted); margin-bottom: 3px; }
+    .draft { border-color: var(--accent); }
+    .field { margin-bottom: 10px; }
+    .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    @media (max-width: 860px) { .grid { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <div class="grid">
+    <div class="card full">
+      <div class="row" style="justify-content: space-between;">
+        <div>
+          <h1>Контекстный чат-стенд</h1>
+          <div class="row" style="margin-top: 6px;">
+            <span class="pill">Канал: <strong id="targetChannel">-</strong></span>
+            <span class="pill">Отправитель: <strong id="authSender">-</strong></span>
+            <span class="pill" id="connPill">Подключение: -</span>
+            <span class="pill" id="runPill">Режим: -</span>
+            <span class="pill">Автоотправка: <strong id="autoSend">выкл</strong></span>
+          </div>
+        </div>
+        <div class="row">
+          <button onclick="sendControl('start')">Запуск</button>
+          <button class="warn" onclick="sendControl('pause')">Пауза</button>
+          <button class="danger" onclick="sendControl('stop')">Остановка</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Входящие сообщения</h2>
+      <div id="messagesFeed" class="feed"></div>
+      <div class="two-col" style="margin-bottom: 8px;">
+        <div>
+          <label for="localSender">Отправитель (тест: owner / viewer_1)</label>
+          <input id="localSender" value="owner" />
+        </div>
+        <div>
+          <label for="localText">Сообщение в локальный чат</label>
+          <input id="localText" placeholder="Например: Привет, что думаешь про тест?" />
+        </div>
+      </div>
+      <button onclick="sendLocalMessage()">Отправить в локальный чат</button>
+    </div>
+
+    <div class="card">
+      <h2>Подготовленный ответ и доставка</h2>
+      <div id="draftsFeed" class="feed"></div>
+      <div class="pill" style="display: inline-block; margin-top: 6px;">
+        LLM-запросов: <strong id="llmReq">0</strong> |
+        Токены: <strong id="llmTokens">0</strong>
+        (<span id="llmModel">-</span>)
+      </div>
+    </div>
+
+    <div class="card full">
+      <h2>Профиль ИИ-участника</h2>
+      <div class="two-col">
+        <div class="field">
+          <label for="profName">Имя участника</label>
+          <input id="profName" />
+        </div>
+        <div class="field">
+          <label for="profEnabled">Активен</label>
+          <select id="profEnabled">
+            <option value="true">Да</option>
+            <option value="false">Нет</option>
+          </select>
+        </div>
+      </div>
+      <div class="field">
+        <label for="profPersona">Системная инструкция / стиль</label>
+        <textarea id="profPersona" rows="2"></textarea>
+      </div>
+      <div class="two-col">
+        <div class="field">
+          <label for="profCtx">Окно контекста (сообщений)</label>
+          <input id="profCtx" type="number" min="1" max="50" />
+        </div>
+        <div class="field">
+          <label for="profInterval">Мин. интервал (сек)</label>
+          <input id="profInterval" type="number" step="0.5" min="0" />
+        </div>
+      </div>
+      <button class="secondary" onclick="saveProfile()">Сохранить профиль</button>
+    </div>
+  </div>
+
+<script>
+let profileLoaded = false;
+
+async function api(path, method = 'GET', body = null) {
+  const opts = { method, headers: {} };
+  if (body !== null) {
+    opts.headers['Content-Type'] = 'application/json';
+    opts.body = JSON.stringify(body);
+  }
+  const res = await fetch(path, opts);
+  return res.json();
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+async function refresh() {
+  const data = await api('/api/state');
+  document.getElementById('targetChannel').textContent = data.connection.target_channel;
+  document.getElementById('authSender').textContent = data.connection.authorized_sender;
+  document.getElementById('connPill').textContent = `Подключение: ${data.connection.mode} (${data.connection.status})`;
+  document.getElementById('runPill').textContent = `Режим: ${data.run_state}`;
+  document.getElementById('autoSend').textContent = data.auto_send ? 'вкл' : 'выкл';
+
+  document.getElementById('llmReq').textContent = data.llm_stats.request_count;
+  document.getElementById('llmTokens').textContent = data.llm_stats.usage.total_tokens || 0;
+  document.getElementById('llmModel').textContent = data.llm_stats.model;
+
+  if (!profileLoaded) {
+    document.getElementById('profName').value = data.profile.display_name;
+    document.getElementById('profEnabled').value = String(data.profile.enabled);
+    document.getElementById('profPersona').value = data.profile.persona_prompt;
+    document.getElementById('profCtx').value = data.profile.context_window;
+    document.getElementById('profInterval').value = data.profile.min_reply_interval_sec;
+    profileLoaded = true;
+  }
+
+  const msgEl = document.getElementById('messagesFeed');
+  msgEl.innerHTML = data.messages.map(m => `
+    <div class="msg">
+      <div class="meta">${escapeHtml(m.sender_login)} · <strong>${escapeHtml(m.role)}</strong> · ${escapeHtml(m.source)}</div>
+      <div>${escapeHtml(m.text)}</div>
+    </div>
+  `).join('') || '<div class="meta">Сообщений пока нет.</div>';
+
+  const draftsEl = document.getElementById('draftsFeed');
+  draftsEl.innerHTML = data.drafts.slice().reverse().map(d => {
+    const deliv = d.delivery
+      ? `<div class="meta">Доставка: is_sent=${d.delivery.is_sent}, status=${d.delivery.status_code ?? '-'}, drop=${escapeHtml(JSON.stringify(d.delivery.drop_reason))}, err=${escapeHtml(d.delivery.error ?? '-')}</div>`
+      : '';
+    const controls = d.status === 'pending_approval'
+      ? `
+        <textarea id="edit_${d.draft_id}" rows="2" style="margin:6px 0;">${escapeHtml(d.text)}</textarea>
+        <div class="row">
+          <button onclick="approveDraft('${d.draft_id}')">Подтвердить и отправить</button>
+          <button class="secondary" onclick="rejectDraft('${d.draft_id}')">Отклонить</button>
+        </div>
+      `
+      : `<div>${escapeHtml(d.text)}</div>`;
+    return `
+      <div class="msg draft">
+        <div class="meta">${escapeHtml(d.bot_name)} → ответ на ${escapeHtml(d.trigger_sender)} · статус: <strong>${escapeHtml(d.status)}</strong></div>
+        ${controls}
+        ${deliv}
+      </div>
+    `;
+  }).join('') || '<div class="meta">Черновиков пока нет.</div>';
+}
+
+async function sendControl(action) {
+  await api('/api/control', 'POST', { action });
+  await refresh();
+}
+
+async function sendLocalMessage() {
+  const sender_login = document.getElementById('localSender').value.trim() || 'owner';
+  const textEl = document.getElementById('localText');
+  const text = textEl.value.trim();
+  if (!text) return;
+  textEl.value = '';
+  await api('/api/local-message', 'POST', { sender_login, text });
+  await refresh();
+}
+
+async function approveDraft(draftId) {
+  const edited = document.getElementById(`edit_${draftId}`)?.value;
+  await api('/api/approve', 'POST', { draft_id: draftId, edited_text: edited });
+  await refresh();
+}
+
+async function rejectDraft(draftId) {
+  await api('/api/reject', 'POST', { draft_id: draftId });
+  await refresh();
+}
+
+async function saveProfile() {
+  await api('/api/profile', 'POST', {
+    display_name: document.getElementById('profName').value,
+    enabled: document.getElementById('profEnabled').value === 'true',
+    persona_prompt: document.getElementById('profPersona').value,
+    context_window: Number(document.getElementById('profCtx').value),
+    min_reply_interval_sec: Number(document.getElementById('profInterval').value),
+  });
+  await refresh();
+}
+
+refresh();
+setInterval(refresh, 2500);
+</script>
+</body>
+</html>

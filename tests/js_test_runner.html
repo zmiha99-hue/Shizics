@@ -1,0 +1,372 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Extension JS Test Runner</title></head>
+<body>
+<pre id="results"></pre>
+<script>
+// Minimal chrome.* and service-worker shim for testing llm.js & background.js in headless V8.
+const mockStore = {};
+const storageListeners = [];
+const messageListeners = [];
+let sendMessageCalls = [];
+let fetchCalls = [];
+let nextFetchResponder = async () => ({
+  ok: true,
+  status: 200,
+  json: async () => ({
+    message: { content: JSON.stringify({ addressed_to: "me", thought: "ok", reply: "Привет!" }) },
+    prompt_eval_count: 10,
+    eval_count: 5
+  })
+});
+
+window.importScripts = () => {};
+
+window.chrome = {
+  runtime: {
+    lastError: null,
+    onInstalled: { addListener: () => {} },
+    onMessage: { addListener: (fn) => messageListeners.push(fn) }
+  },
+  sidePanel: {
+    setPanelBehavior: async () => {}
+  },
+  tabs: {
+    sendMessage: async (tabId, msg) => {
+      sendMessageCalls.push({ tabId, msg });
+      await new Promise((r) => setTimeout(r, 30));
+      return { status: "confirmed", error: "" };
+    }
+  },
+  storage: {
+    local: {
+      get: (keys, cb) => {
+        const list = Array.isArray(keys) ? keys : [keys];
+        const out = {};
+        for (const k of list) {
+          if (k in mockStore) out[k] = structuredClone(mockStore[k]);
+        }
+        if (cb) cb(out);
+        return Promise.resolve(out);
+      },
+      set: (obj, cb) => {
+        const changes = {};
+        for (const [k, v] of Object.entries(obj)) {
+          changes[k] = { oldValue: structuredClone(mockStore[k]), newValue: structuredClone(v) };
+          mockStore[k] = structuredClone(v);
+        }
+        for (const fn of storageListeners) {
+          fn(changes, "local");
+        }
+        if (cb) cb();
+        return Promise.resolve();
+      }
+    },
+    onChanged: {
+      addListener: (fn) => storageListeners.push(fn)
+    }
+  }
+};
+
+window.fetch = async (url, opts) => {
+  fetchCalls.push({ url, opts });
+  return nextFetchResponder(url, opts);
+};
+</script>
+<script src="../browser_extension/llm.js"></script>
+<script src="../browser_extension/background.js"></script>
+<script>
+function assert(cond, msg) {
+  if (!cond) throw new Error("Assertion failed: " + msg);
+}
+
+async function runTests() {
+  const results = [];
+  async function test(name, fn) {
+    try {
+      await fn();
+      results.push("PASS: " + name);
+    } catch (e) {
+      results.push("FAIL: " + name + " -> " + (e && e.stack ? e.stack : String(e)));
+    }
+  }
+
+  // Group 1: Command & broken JSON rejection
+  await test("Group1_RejectCommandsAndBrokenJson", async () => {
+    assert(formatReplyText("/ban mishakuhn", false) === "NO_REPLY", "slash command must be rejected");
+    assert(formatReplyText(".timeout user 60", false) === "NO_REPLY", "dot command must be rejected");
+    assert(extractReplyFromOutput('{"addressed_to":"me","thought":"abc","reply":"при', true) === "", "truncated JSON must return empty");
+    assert(extractReplyFromOutput('{"for_another_person":true,"thought":"to Yakov","reply":"привет"}', true) === "", "for_another_person=true must return empty");
+    assert(extractReplyFromOutput('{"for_another_person":false,"thought":"to all","reply":"Да, я тут!"}', true) === "Да, я тут!", "for_another_person=false must return reply");
+    assert(sanitizeMemoryFact('Сейчас играл}”** 3:15 PM', '') === "", "garbage memoryFact with } or ** must be rejected");
+    assert(sanitizeMemoryFact('живёшь в общаге', DEFAULT_PERSONA_PROMPT) === "", "verbatim persona copy must be rejected from memoryFact");
+
+    await chrome.storage.local.set({
+      settings: { ...DEFAULT_SETTINGS, allowedChannel: "mishakuhn", runState: "running" },
+      contextState: { ...DEFAULT_STATE, channel: "mishakuhn", channelAllowed: true, tabId: 1 },
+      draftState: { ...DEFAULT_DRAFT, status: "preview", text: "ok" }
+    });
+    const cmdRes = await handleConfirmSendOnce("/ban someone", false);
+    assert(!cmdRes.ok && cmdRes.error.includes("команд"), "handleConfirmSendOnce must block commands");
+    const jsonRes = await handleConfirmSendOnce('{"reply":"broken"}', false);
+    assert(!jsonRes.ok && jsonRes.error.includes("JSON"), "handleConfirmSendOnce must block raw JSON");
+  });
+
+  // Group 1: Double-send lock
+  await test("Group1_BlockDoubleSend", async () => {
+    sendMessageCalls = [];
+    await chrome.storage.local.set({
+      settings: { ...DEFAULT_SETTINGS, allowedChannel: "mishakuhn", runState: "running" },
+      contextState: { ...DEFAULT_STATE, channel: "mishakuhn", channelAllowed: true, tabId: 42 },
+      draftState: { ...DEFAULT_DRAFT, status: "preview", text: "Привет!" }
+    });
+    const [r1, r2] = await Promise.all([
+      handleConfirmSendOnce("Привет!", false),
+      handleConfirmSendOnce("Привет!", false)
+    ]);
+    assert(sendMessageCalls.length === 1, "only 1 tab sendMessage should occur");
+    assert(r1.ok === true && r2.ok === false, "second concurrent send must be rejected");
+  });
+
+  // Group 1: Pause/Stop epoch prevents stale draft overwrite
+  await test("Group1_PauseCancelsInFlightDraft", async () => {
+    await chrome.storage.local.set({
+      settings: { ...DEFAULT_SETTINGS, allowedChannel: "mishakuhn", runState: "running" },
+      contextState: { ...DEFAULT_STATE, channel: "mishakuhn", channelAllowed: true, tabId: 42 },
+      draftState: { ...DEFAULT_DRAFT, status: "idle" }
+    });
+    nextFetchResponder = async () => {
+      await chrome.storage.local.set({
+        settings: { ...DEFAULT_SETTINGS, allowedChannel: "mishakuhn", runState: "paused" }
+      });
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          message: { content: JSON.stringify({ addressed_to: "me", thought: "ok", reply: "Опоздавший ответ" }) }
+        })
+      };
+    };
+    await runDraftGeneration({ id: "m_p1", author: "mishakuhn", text: "привет" }, []);
+    const { draftState } = await chrome.storage.local.get(["draftState"]);
+    assert(draftState.status !== "preview", "paused generation must not become preview");
+  });
+
+  // Group 2: Stale state overwrite protection via withStateLock
+  await test("Group2_NoStaleContextOverwrite", async () => {
+    await chrome.storage.local.set({
+      settings: { ...DEFAULT_SETTINGS, allowedChannel: "mishakuhn", runState: "running" },
+      contextState: {
+        ...DEFAULT_STATE,
+        channel: "mishakuhn",
+        channelAllowed: true,
+        tabId: 42,
+        messages: [{ id: "m1", author: "mishakuhn", text: "первое?", role: "controller_human" }]
+      },
+      draftState: { ...DEFAULT_DRAFT }
+    });
+    nextFetchResponder = async () => {
+      // Simulate newer message arriving while LLM fetch is in-flight
+      await withStateLock(async () => {
+        const cur = await chrome.storage.local.get(["contextState"]);
+        const s = cur.contextState;
+        s.messages.push({ id: "m2", author: "mishakuhn", text: "свежее сообщение", role: "controller_human" });
+        await chrome.storage.local.set({ contextState: s });
+      });
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          message: { content: JSON.stringify({ addressed_to: "me", thought: "ok", reply: "Как дела?" }) }
+        })
+      };
+    };
+    await runDraftGeneration(
+      { id: "m1", author: "mishakuhn", text: "первое?" },
+      [{ id: "m1", author: "mishakuhn", text: "первое?", role: "controller_human" }]
+    );
+    const { contextState } = await chrome.storage.local.get(["contextState"]);
+    assert(contextState.messages.some((m) => m.id === "m2"), "fresh message m2 must not be overwritten");
+  });
+
+  // Group 3: Explicit trigger turn & unified providers
+  await test("Group3_ExplicitTriggerAndProviders", async () => {
+    const turns = buildAlternatingTurns(
+      [
+        { id: "1", author: "mishakuhn", text: "привет", role: "controller_human" },
+        { id: "2", author: "cocainu", text: "здарова", role: "own_ai" },
+        { id: "3", author: "mishakuhn", text: "как сам", role: "controller_human" }
+      ],
+      { id: "3", author: "mishakuhn", text: "как сам", role: "controller_human" }
+    );
+    assert(turns.length === 3, "should have user, assistant, and explicit final trigger user");
+    assert(turns[2].content.includes("Ответь на это сообщение") && turns[2].content.includes("как сам"), "final turn must be explicit trigger");
+
+    fetchCalls = [];
+    nextFetchResponder = async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        choices: [{ message: { content: JSON.stringify({ addressed_to: "me", thought: "t", reply: "Норм" }) } }]
+      })
+    });
+    const res = await generatePreviewReply({
+      provider: "openai_compat",
+      endpointUrl: "http://127.0.0.1:1234/v1",
+      model: "local",
+      personaPrompt: "Лёша",
+      messages: [{ id: "1", author: "mishakuhn", text: "привет", role: "controller_human" }],
+      triggerMessage: { id: "1", author: "mishakuhn", text: "привет", role: "controller_human" },
+      useAiPrefix: false,
+      deepThink: true,
+      botLogin: "cocainu"
+    });
+    assert(res.text === "Норм", "openai_compat must support deepThink JSON & botLogin");
+    const sentBody = JSON.parse(fetchCalls[0].opts.body);
+    assert(sentBody.messages[0].content.includes("cocainu"), "system prompt must include botLogin");
+  });
+
+  // Group 3: No repeat generation for processedTriggerIds
+  await test("Group3_NoRepeatProcessedTriggerIds", async () => {
+    fetchCalls = [];
+    await chrome.storage.local.set({
+      settings: { ...DEFAULT_SETTINGS, allowedChannel: "mishakuhn", controllerLogin: "mishakuhn", runState: "running" },
+      contextState: {
+        ...DEFAULT_STATE,
+        channel: "mishakuhn",
+        channelAllowed: true,
+        tabId: 42,
+        messages: [{ id: "m_old", author: "mishakuhn", text: "старт", role: "controller_human" }],
+        processedTriggerIds: ["m_100"]
+      },
+      draftState: { ...DEFAULT_DRAFT, status: "idle", triggerMessageId: "" }
+    });
+
+    await new Promise((resolve) => {
+      messageListeners[0](
+        {
+          type: "TWITCH_PAGE_CONTEXT_UPDATE",
+          channel: "mishakuhn",
+          chatDetected: true,
+          messages: [
+            { id: "m_old", author: "mishakuhn", text: "старт" },
+            { id: "m_100", author: "mishakuhn", text: "уже обработано" }
+          ]
+        },
+        { tab: { id: 42, url: "https://www.twitch.tv/mishakuhn" } },
+        () => resolve()
+      );
+    });
+    await new Promise((r) => setTimeout(r, 30));
+    assert(fetchCalls.length === 0, "already-processed trigger id m_100 must not re-trigger LLM");
+  });
+
+  // Character Memory: extracted on preview, committed ONLY on confirmed send, injected on next call, cleared on command
+  await test("Memory_LifecycleAndConfirmedCommit", async () => {
+    fetchCalls = [];
+    await chrome.storage.local.set({
+      settings: { ...DEFAULT_SETTINGS, allowedChannel: "mishakuhn", controllerLogin: "mishakuhn", runState: "running" },
+      contextState: { ...DEFAULT_STATE, channel: "mishakuhn", channelAllowed: true, tabId: 42 },
+      draftState: { ...DEFAULT_DRAFT },
+      characterMemory: []
+    });
+
+    nextFetchResponder = async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        message: {
+          content: JSON.stringify({
+            addressed_to: "me",
+            thought: "reply",
+            reply: "Только с вечерней смены пришёл, чай заварил.",
+            memory_fact: "Работает в вечернюю смену и пьёт чай"
+          })
+        }
+      })
+    });
+
+    await runDraftGeneration({ id: "m_mem1", author: "mishakuhn", text: "как день?" }, []);
+    let stored = await chrome.storage.local.get(["draftState", "characterMemory"]);
+    assert(stored.draftState.pendingMemoryFact === "Работает в вечернюю смену и пьёт чай", "pendingMemoryFact should be on draft");
+    assert(stored.characterMemory.length === 0, "unsent draft must not commit to characterMemory");
+
+    const sendRes = await handleConfirmSendOnce(stored.draftState.text, false);
+    assert(sendRes.ok === true, "send must succeed");
+    stored = await chrome.storage.local.get(["characterMemory"]);
+    assert(stored.characterMemory.length === 1, "confirmed send must commit memory fact");
+
+    // Next generation must receive the remembered fact in system prompt
+    await runDraftGeneration({ id: "m_mem2", author: "mishakuhn", text: "а завтра?" }, []);
+    const secondPayload = JSON.parse(fetchCalls[fetchCalls.length - 1].opts.body);
+    assert(
+      secondPayload.messages[0].content.includes("Работает в вечернюю смену и пьёт чай"),
+      "system prompt must include committed characterMemory"
+    );
+
+    // Clear memory
+    await new Promise((resolve) => {
+      messageListeners[0]({ type: "CLEAR_CHARACTER_MEMORY" }, {}, () => resolve());
+    });
+    stored = await chrome.storage.local.get(["characterMemory"]);
+    assert(stored.characterMemory.length === 0, "CLEAR_CHARACTER_MEMORY must empty characterMemory");
+  });
+
+  // Rolling 60s per-minute budget + 4..11s natural delay
+  await test("Auto_NaturalCooldownDefersAndAccumulatesContext", async () => {
+    fetchCalls = [];
+    const now = Date.now();
+    const nextTs = computeNextAllowedAt();
+    assert(nextTs >= now + 4000 && nextTs <= now + 11500, "nextAllowedAt must be 4..11s natural delay");
+
+    // Simulate 7 replies already sent in the last 60s (100/15m -> 7/min cap)
+    await chrome.storage.local.set({
+      settings: { ...DEFAULT_SETTINGS, allowedChannel: "mishakuhn", controllerLogin: "mishakuhn", runState: "running" },
+      contextState: {
+        ...DEFAULT_STATE,
+        channel: "mishakuhn",
+        channelAllowed: true,
+        tabId: 42,
+        messages: [{ id: "m_base", author: "mishakuhn", text: "начало", role: "controller_human" }]
+      },
+      autoExperiment: {
+        ...DEFAULT_AUTO,
+        enabled: true,
+        maxMessages: 100,
+        durationMin: 15,
+        expiresAt: now + 900000,
+        nextAllowedAt: now - 1000,
+        recentAutoTimestamps: [now - 50000, now - 40000, now - 30000, now - 25000, now - 20000, now - 10000, now - 5000],
+        pendingAutoReply: false
+      }
+    });
+
+    await new Promise((resolve) => {
+      messageListeners[0](
+        {
+          type: "TWITCH_PAGE_CONTEXT_UPDATE",
+          channel: "mishakuhn",
+          chatDetected: true,
+          messages: [
+            { id: "m_base", author: "mishakuhn", text: "начало" },
+            { id: "m_cd1", author: "mishakuhn", text: "пишу во время минутного лимита" }
+          ]
+        },
+        { tab: { id: 42, url: "https://www.twitch.tv/mishakuhn" } },
+        () => resolve()
+      );
+    });
+    await new Promise((r) => setTimeout(r, 30));
+    assert(fetchCalls.length === 0, "must not call LLM when rolling 60s per-minute cap is reached");
+    const { contextState, autoExperiment } = await chrome.storage.local.get(["contextState", "autoExperiment"]);
+    assert(contextState.messages.some((m) => m.id === "m_cd1"), "must accumulate context while waiting for slot");
+    assert(autoExperiment.pendingAutoReply === true, "must mark pendingAutoReply for flush when slot frees");
+  });
+
+  document.getElementById("results").textContent = results.join("\n");
+}
+
+void runTests();
+</script>
+</body>
+</html>
