@@ -466,12 +466,12 @@ async function handleConfirmSendOnce(editedText, isAutoSend = false) {
     });
 
     if (isAutoSend) {
-      if (deliveryStatus === "confirmed") {
+      if (deliveryStatus === "confirmed" || deliveryStatus === "uncertain") {
         let reachedMax = false;
         await withStateLock(async () => {
           const latest = await chrome.storage.local.get(["autoExperiment"]);
           const auto = { ...DEFAULT_AUTO, ...(latest.autoExperiment || {}) };
-          const nextCount = auto.sentCount + 1;
+          const nextCount = deliveryStatus === "confirmed" ? auto.sentCount + 1 : auto.sentCount;
           reachedMax = nextCount >= auto.maxMessages;
           const nowSent = Date.now();
           const prevRecent = (Array.isArray(auto.recentAutoTimestamps) ? auto.recentAutoTimestamps : [])
@@ -492,7 +492,7 @@ async function handleConfirmSendOnce(editedText, isAutoSend = false) {
         }
       } else {
         await stopAutoExperiment(
-          `Авторежим остановлен (${deliveryStatus}): ${deliveryError || "неопределённый результат доставки"}`,
+          `Авторежим остановлен (${deliveryStatus}): ${deliveryError || "ошибка доставки"}`,
           true
         );
       }

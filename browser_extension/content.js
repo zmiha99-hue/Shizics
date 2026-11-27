@@ -156,7 +156,7 @@
 
   function extractMessageText(lineEl) {
     const textNodes = lineEl.querySelectorAll(
-      '[data-a-target="chat-message-text"], .text-fragment, [data-a-target="emote-name"]'
+      '[data-a-target="chat-message-text"], .text-fragment, [data-a-target="emote-name"], .mention-fragment, [data-a-target="chat-message-mention"], .link-fragment'
     );
     if (textNodes.length > 0) {
       const parts = [];
@@ -243,8 +243,9 @@
     return items;
   }
 
-  function waitForSentMessageInDom(expectedText, priorCount, timeoutMs = 6000) {
-    const targetNorm = expectedText.replace(/\s+/g, " ").trim();
+  function waitForSentMessageInDom(expectedText, priorCount, timeoutMs = 10000) {
+    const normForCmp = (s) => String(s || "").replace(/\s+/g, " ").replace(/\s+([!?.,:])/g, "$1").trim().toLowerCase();
+    const targetNorm = normForCmp(expectedText);
     return new Promise((resolve) => {
       const started = Date.now();
       const timer = setInterval(() => {
@@ -252,7 +253,7 @@
         const msgs = readVisibleMessages(container);
         const tail = msgs.slice(Math.max(0, Math.min(priorCount, msgs.length) - 3));
         const found = tail.some((m) => {
-          const norm = m.text.replace(/\s+/g, " ").trim();
+          const norm = normForCmp(m.text);
           return norm === targetNorm || norm.includes(targetNorm);
         });
         if (found) {
@@ -270,10 +271,10 @@
 
   async function handleSendOnce(expectedChannel, textToSend) {
     const cleanSend = String(textToSend || "").trim();
-    if (!cleanSend || cleanSend.startsWith("/") || cleanSend.startsWith(".") || cleanSend.startsWith("{")) {
+    if (!cleanSend || cleanSend.startsWith("/") || cleanSend.startsWith(".") || cleanSend.startsWith("!") || cleanSend.startsWith("{")) {
       return {
         status: "blocked",
-        error: "Отправка команд (/ или .) и сырого JSON запрещена."
+        error: "Отправка команд (/, ., !) и сырого JSON запрещена."
       };
     }
 
